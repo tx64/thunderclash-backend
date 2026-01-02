@@ -4,6 +4,7 @@ const multer = require('multer');
 const cors = require('cors');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const TelegramBot = require('node-telegram-bot-api');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,18 +12,21 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// 1. Configure Cloudinary
+// 1. Setup Telegram Bot
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
+
+// 2. Configure Cloudinary
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// 2. Configure Storage (Tell Multer to save to Cloudinary)
+// 3. Configure Storage
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
-        folder: 'thunderclash_payments', // Folder name in Cloudinary
+        folder: 'thunderclash_payments',
         allowed_formats: ['jpg', 'png', 'jpeg'],
     },
 });
@@ -30,26 +34,42 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage });
 
 // THE ROUTE
-app.post('/register', upload.single('screenshot'), (req, res) => {
+app.post('/register', upload.single('screenshot'), async (req, res) => {
     try {
-        // Check if file is missing
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'No file uploaded' });
         }
 
-        const playerData = req.body;
-        
-        console.log('--- NEW REGISTRATION RECEIVED ---');
-        console.log('Player:', playerData.playerName);
-        console.log('UID:', playerData.freeFireUID);
-        console.log('Image Saved at:', req.file.path); // The Internet URL
-        console.log('---------------------------------');
+        const { playerName, freeFireUID, email, phone, paymentMethod } = req.body;
+        const imageUrl = req.file.path;
 
-        // Send success response with the image URL
+        console.log('--- NEW REGISTRATION ---');
+        console.log(`Player: ${playerName}, UID: ${freeFireUID}`);
+
+        // --- SEND TO TELEGRAM ---
+        const message = `
+🚀 *NEW REGISTRATION RECEIVED*
+
+👤 *Name:* ${playerName}
+🎮 *UID:* \`${freeFireUID}\`
+📞 *Phone:* ${phone}
+📧 *Email:* ${email}
+YZ *Method:* ${paymentMethod}
+
+👇 *Payment Screenshot below:*
+`;
+
+        // Send Text
+        await bot.sendMessage(process.env.TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' });
+        
+        // Send Image
+        await bot.sendPhoto(process.env.TELEGRAM_CHAT_ID, imageUrl);
+
+        // Return success to user
         res.json({ 
             success: true, 
             message: 'Registration successful!',
-            imageUrl: req.file.path 
+            imageUrl: imageUrl 
         });
 
     } catch (error) {
@@ -58,7 +78,6 @@ app.post('/register', upload.single('screenshot'), (req, res) => {
     }
 });
 
-// Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
