@@ -1,6 +1,6 @@
 /* =========================================
    THUNDERCLASH 2026 - BACKEND SERVER
-   (Includes Wake-up Route for Fast Submissions)
+   (Features: Cloudinary, Reg Bot, Contact Bot, Wake-up)
    ========================================= */
 
 require('dotenv').config();
@@ -17,14 +17,32 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// --- TELEGRAM CONFIG ---
-if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
-    console.error("❌ CRITICAL: Telegram Env Variables Missing!");
-    process.exit(1);
-}
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
+// ==================================================
+// 🤖 BOT SETUP
+// ==================================================
 
-// --- CLOUDINARY CONFIG ---
+// 1. REGISTRATION BOT
+if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+    console.error("❌ CRITICAL: Registration Bot Vars Missing!");
+}
+const regBot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
+
+// 2. CONTACT SUPPORT BOT
+const contactToken = process.env.CONTACT_BOT_TOKEN;
+const contactChatId = process.env.CONTACT_CHAT_ID;
+let contactBot = null;
+
+if (contactToken && contactChatId) {
+    contactBot = new TelegramBot(contactToken, { polling: false });
+    console.log("✅ Contact Support Bot Initialized");
+} else {
+    console.warn("⚠️ Contact Bot Vars missing. Contact form will not work.");
+}
+
+
+// ==================================================
+// ☁️ CLOUDINARY CONFIG
+// ==================================================
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -41,19 +59,54 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage: storage });
 
 
-// --- 🚀 NEW WAKE-UP ROUTE ---
-// The frontend calls this silently when the form opens.
+// ==================================================
+// 🚀 ROUTES
+// ==================================================
+
+// 1. WAKE UP ROUTE
 app.get('/wakeup', (req, res) => {
-    console.log("☀️ Wake-up ping received! Server is warming up...");
+    console.log("☀️ Wake-up ping received!");
     res.send("Server is awake and ready!");
 });
 
 
-// --- MAIN REGISTER ROUTE ---
+// 2. CONTACT FORM ROUTE (Updated for Phone Number)
+app.post('/contact', async (req, res) => {
+    try {
+        console.log("📩 New Support Message Received");
+        // CHANGED: receiving 'phone' instead of 'email'
+        const { name, phone, uid, message } = req.body;
+
+        if (!contactBot) {
+            return res.status(500).json({ success: false, message: 'Support bot not configured.' });
+        }
+
+        const telegramMsg = `
+📬 *NEW SUPPORT TICKET*
+
+👤 *User:* ${name}
+📞 *Phone:* \`${phone}\`
+🎮 *UID:* \`${uid}\`
+
+📝 *Message:*
+${message}
+`;
+
+        await contactBot.sendMessage(contactChatId, telegramMsg, { parse_mode: 'Markdown' });
+        res.json({ success: true, message: 'Message sent successfully!' });
+
+    } catch (error) {
+        console.error("❌ Contact Error:", error);
+        res.status(500).json({ success: false, message: 'Failed to send message.' });
+    }
+});
+
+
+// 3. REGISTRATION ROUTE
 app.post('/register', upload.single('screenshot'), async (req, res) => {
     try {
         console.log("------------------------------------------------");
-        console.log("📥 NEW REQUEST:", req.body.playerName);
+        console.log("📥 NEW REGISTRATION:", req.body.playerName);
 
         if (!req.file) {
             return res.status(400).json({ success: false, message: 'Payment screenshot is required' });
@@ -74,7 +127,6 @@ app.post('/register', upload.single('screenshot'), async (req, res) => {
         const imageUrl = req.file.path;
         let message = '';
 
-        // --- PREPARE MESSAGE ---
         if (registrationType === 'SQUAD') {
             message = `
 🚨 *NEW SQUAD REGISTRATION* 🚨
@@ -108,13 +160,12 @@ Method: ${paymentMethod}
 `;
         }
 
-        // --- SEND PHOTO WITH CAPTION ---
-        await bot.sendPhoto(process.env.TELEGRAM_CHAT_ID, imageUrl, {
+        await regBot.sendPhoto(process.env.TELEGRAM_CHAT_ID, imageUrl, {
             caption: message,
             parse_mode: 'Markdown'
         });
 
-        console.log("✅ Sent to Telegram as Single Message");
+        console.log("✅ Registration Sent to Telegram");
 
         res.json({ 
             success: true, 
