@@ -1,6 +1,6 @@
 /* =========================================
    THUNDERCLASH 2026 - BACKEND SERVER
-   (Final Version: Handles Solo vs. Squad Telegram Messages)
+   (Fixed: Photo & Text sent as ONE message)
    ========================================= */
 
 require('dotenv').config();
@@ -14,18 +14,17 @@ const TelegramBot = require('node-telegram-bot-api');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
 
-// --- TELEGRAM CONFIG ---
+// TELEGRAM
 if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
     console.error("❌ CRITICAL: Telegram Env Variables Missing!");
     process.exit(1);
 }
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: false });
 
-// --- CLOUDINARY CONFIG ---
+// CLOUDINARY
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -36,97 +35,91 @@ const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
     params: {
         folder: 'thunderclash_payments',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'heic'], // Supports iPhone format
+        allowed_formats: ['jpg', 'png', 'jpeg', 'heic'],
     },
 });
 const upload = multer({ storage: storage });
 
-
-// --- MAIN REGISTER ROUTE ---
+// --- REGISTER ROUTE ---
 app.post('/register', upload.single('screenshot'), async (req, res) => {
     try {
-        // 1. Validation: File Check
+        console.log("------------------------------------------------");
+        console.log("📥 NEW REQUEST:", req.body.playerName);
+
         if (!req.file) {
-            console.warn("⚠️ Registration attempt without screenshot.");
             return res.status(400).json({ success: false, message: 'Payment screenshot is required' });
         }
 
-        // 2. Extract Data from Frontend
         const {
-            registrationType, // 'SOLO' or 'SQUAD'
+            registrationType,
             playerName,
-            freeFireUID,      // This is Player UID (Solo) or Leader UID (Squad)
+            freeFireUID,
             email,
             phone,
             paymentMethod,
-            teammate1UID,     // Squad only
-            teammate2UID,     // Squad only
-            teammate3UID      // Squad only
+            teammate1UID,
+            teammate2UID,
+            teammate3UID
         } = req.body;
 
         const imageUrl = req.file.path;
         let message = '';
 
-        console.log(`📥 Received: ${registrationType} from ${playerName}`);
-
-        // 3. Build Telegram Message based on Type
+        // --- PREPARE MESSAGE (Shortened slightly to fit Caption limits) ---
         if (registrationType === 'SQUAD') {
-            // --- SQUAD TEMPLATE (Full Details) ---
             message = `
-🚀 *NEW SQUAD REGISTRATION RECEIVED*
+🚨 *NEW SQUAD REGISTRATION* 🚨
 
-👥 *TEAM LEADER*
-👤 *Name:* ${playerName}
-📧 *Email:* ${email}
-📞 *Phone:* ${phone}
+👥 *LEADER INFO*
+👤 Name: *${playerName}*
+📧 Email: ${email}
+📞 Phone: \`${phone}\`
 
-⚔️ *SQUAD UIDs (4 Players)*
-1. \`${freeFireUID}\` (Leader)
+⚔️ *ROSTER (4 Players)*
+1. \`${freeFireUID}\` (L)
 2. \`${teammate1UID}\`
 3. \`${teammate2UID}\`
 4. \`${teammate3UID}\`
 
-💸 *PAYMENT INFO*
+💸 *PAYMENT*
 Method: ${paymentMethod}
-Status: *Review Screenshot Below*
 `;
         } else {
-            // --- SOLO TEMPLATE (Standard) ---
             message = `
-👤 *NEW SOLO REGISTRATION RECEIVED*
+👤 *NEW SOLO REGISTRATION*
 
-👤 *Name:* ${playerName}
-🎮 *UID:* \`${freeFireUID}\`
-📧 *Email:* ${email}
-📞 *Phone:* ${phone}
+🕴️ *PLAYER INFO*
+👤 Name: *${playerName}*
+🎮 UID: \`${freeFireUID}\`
+📧 Email: ${email}
+📞 Phone: \`${phone}\`
 
-💸 *PAYMENT INFO*
+💸 *PAYMENT*
 Method: ${paymentMethod}
-Status: *Review Screenshot Below*
 `;
         }
 
-        // 4. Send to Telegram
-        // Send Text
-        await bot.sendMessage(process.env.TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' });
-        
-        // Send Screenshot
-        await bot.sendPhoto(process.env.TELEGRAM_CHAT_ID, imageUrl);
+        // --- THE FIX: SEND PHOTO WITH CAPTION ---
+        // Instead of sending text separately, we put the text INSIDE the photo message.
+        await bot.sendPhoto(process.env.TELEGRAM_CHAT_ID, imageUrl, {
+            caption: message,
+            parse_mode: 'Markdown'
+        });
 
-        // 5. Success Response
+        console.log("✅ Sent to Telegram as Single Message");
+
         res.json({ 
             success: true, 
-            message: 'Registration successful! Data sent to admin.',
+            message: 'Registration successful!',
             imageUrl: imageUrl 
         });
 
     } catch (error) {
         console.error('❌ SERVER ERROR:', error);
-        res.status(500).json({ success: false, message: 'Server internal error. Contact support.' });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
-// --- START SERVER ---
 app.listen(PORT, () => {
-    console.log(`⚡ Server running on port ${PORT}`);
+    console.log(`⚡ Server running on http://localhost:${PORT}`);
 });
